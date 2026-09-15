@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37411.7 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SlnDropBuilder", "SlnDropBuilder.csproj", "{0A52A4C7-F8E2-01F2-6418-BCFE688B7D34}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0A52A4C7-F8E2-01F2-6418-BCFE688B7D34}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0A52A4C7-F8E2-01F2-6418-BCFE688B7D34}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0A52A4C7-F8E2-01F2-6418-BCFE688B7D34}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0A52A4C7-F8E2-01F2-6418-BCFE688B7D34}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A4833905-23D4-49D4-80BC-42C90C08FC2B}
+	EndGlobalSection
+EndGlobal
