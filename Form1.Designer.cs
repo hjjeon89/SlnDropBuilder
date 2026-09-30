@@ -18,7 +18,9 @@ partial class Form1
 
     private void InitializeComponent()
     {
+        System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
         _dropPanel = new Panel();
+        pictureBox1 = new PictureBox();
         _rebuildButton = new Button();
         _stopBuildButton = new Button();
         _hideWarningsCheckBox = new CheckBox();
@@ -38,6 +40,7 @@ partial class Form1
         _statusStrip = new StatusStrip();
         _statusLabel = new ToolStripStatusLabel();
         _dropPanel.SuspendLayout();
+        ((System.ComponentModel.ISupportInitialize)pictureBox1).BeginInit();
         ((System.ComponentModel.ISupportInitialize)_parallelBuildCountInput).BeginInit();
         _logTabs.SuspendLayout();
         _allLogTabPage.SuspendLayout();
@@ -48,6 +51,7 @@ partial class Form1
         // 
         _dropPanel.AllowDrop = true;
         _dropPanel.BackColor = Color.FromArgb(42, 48, 57);
+        _dropPanel.Controls.Add(pictureBox1);
         _dropPanel.Controls.Add(_rebuildButton);
         _dropPanel.Controls.Add(_stopBuildButton);
         _dropPanel.Controls.Add(_hideWarningsCheckBox);
@@ -68,6 +72,16 @@ partial class Form1
         _dropPanel.TabIndex = 0;
         _dropPanel.DragDrop += HandleDragDrop;
         _dropPanel.DragEnter += HandleDragEnter;
+        // 
+        // pictureBox1
+        // 
+        pictureBox1.Image = (Image)resources.GetObject("pictureBox1.Image");
+        pictureBox1.Location = new Point(51, 15);
+        pictureBox1.Name = "pictureBox1";
+        pictureBox1.Size = new Size(140, 120);
+        pictureBox1.SizeMode = PictureBoxSizeMode.StretchImage;
+        pictureBox1.TabIndex = 11;
+        pictureBox1.TabStop = false;
         // 
         // _rebuildButton
         // 
@@ -314,6 +328,7 @@ partial class Form1
         Controls.Add(_statusStrip);
         Controls.Add(_dropPanel);
         Font = new Font("Segoe UI", 10F);
+        Icon = (Icon)resources.GetObject("$this.Icon");
         MinimumSize = new Size(920, 620);
         Name = "Form1";
         StartPosition = FormStartPosition.CenterScreen;
@@ -322,6 +337,7 @@ partial class Form1
         DragEnter += HandleDragEnter;
         _dropPanel.ResumeLayout(false);
         _dropPanel.PerformLayout();
+        ((System.ComponentModel.ISupportInitialize)pictureBox1).EndInit();
         ((System.ComponentModel.ISupportInitialize)_parallelBuildCountInput).EndInit();
         _logTabs.ResumeLayout(false);
         _allLogTabPage.ResumeLayout(false);
@@ -350,4 +366,5 @@ partial class Form1
     private ProgressBar _progressBar = null!;
     private StatusStrip _statusStrip = null!;
     private ToolStripStatusLabel _statusLabel = null!;
+    private PictureBox pictureBox1;
 }

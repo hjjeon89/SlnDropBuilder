@@ -379,7 +379,7 @@ public sealed partial class Form1 : Form
             return targetPaths;
         }
 
-        using BuildTargetSelectionDialog dialog = new(rootPath, targetPaths);
+        using BuildTargetSelectionDialog dialog = new(rootPath, targetPaths, Icon);
         return dialog.ShowDialog(this) == DialogResult.OK
             ? dialog.SelectedTargetPaths
             : Array.Empty<string>();
@@ -801,9 +801,15 @@ public sealed class BuildTargetSelectionDialog : Form
     private readonly CheckedListBox _targetList;
     private readonly string[] _targetPaths;
 
-    public BuildTargetSelectionDialog(string rootPath, string[] targetPaths)
+    public BuildTargetSelectionDialog(string rootPath, string[] targetPaths, Icon? icon = null)
     {
         _targetPaths = targetPaths;
+
+        if (icon is not null)
+        {
+            Icon = icon;
+            ShowIcon = true;
+        }
 
         Text = "Select Build Targets";
         StartPosition = FormStartPosition.CenterParent;
