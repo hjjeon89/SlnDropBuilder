@@ -4,196 +4,86 @@ using System.Xml.Linq;
 
 namespace SlnDropBuilder;
 
-public sealed class Form1 : Form
+public sealed partial class Form1 : Form
 {
-    private readonly Panel _dropPanel;
-    private readonly Label _dropTitleLabel;
-    private readonly Label _dropPathLabel;
-    private readonly Button _rebuildButton;
-    private readonly CheckBox _hideWarningsCheckBox;
-    private readonly Label _parallelBuildCountLabel;
-    private readonly NumericUpDown _parallelBuildCountInput;
-    private readonly TabControl _logTabs;
-    private readonly RichTextBox _logBox;
-    private readonly ProgressBar _progressBar;
-    private readonly StatusStrip _statusStrip;
-    private readonly ToolStripStatusLabel _statusLabel;
     private string? _lastRootPath;
     private string[]? _lastSelectedTargetPaths;
     private readonly Dictionary<string, RichTextBox> _targetLogBoxes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TabPage> _targetLogPages = new(StringComparer.OrdinalIgnoreCase);
     private bool _hideWarnings = true;
     private bool _isBuilding;
+    private bool _useDefaultOutputFolder = true;
+    private CancellationTokenSource? _buildCancellationTokenSource;
 
     public Form1()
     {
-        Text = "Sln Drop Builder";
-        StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(920, 620);
-        Size = new Size(1080, 720);
-        BackColor = Color.FromArgb(30, 34, 40);
-        Font = new Font("Segoe UI", 10F);
-        AllowDrop = true;
-
-        _dropPanel = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = 150,
-            BackColor = Color.FromArgb(42, 48, 57),
-            Padding = new Padding(24),
-            AllowDrop = true
-        };
-
-        _dropTitleLabel = new Label
-        {
-            Dock = DockStyle.Top,
-            Height = 44,
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI", 18F, FontStyle.Bold),
-            Text = "Drop a folder to build all child solutions",
-            TextAlign = ContentAlignment.MiddleCenter
-        };
-
-        _dropPathLabel = new Label
-        {
-            Dock = DockStyle.Fill,
-            ForeColor = Color.FromArgb(183, 191, 204),
-            Font = new Font("Segoe UI", 10.5F),
-            Text = "Outputs are written to build\\{Project}\\Debug or Release under the dropped folder.",
-            TextAlign = ContentAlignment.MiddleCenter
-        };
-
-        _rebuildButton = new Button
-        {
-            Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
-            BackColor = Color.FromArgb(72, 98, 140),
-            AllowDrop = true,
-            Enabled = false,
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Color.White,
-            Location = new Point(_dropPanel.Width - 150, _dropPanel.Height - 48),
-            Size = new Size(126, 32),
-            TabIndex = 0,
-            Text = "Rebuild",
-            UseVisualStyleBackColor = false
-        };
-        _rebuildButton.FlatAppearance.BorderSize = 0;
-
-        _hideWarningsCheckBox = new CheckBox
-        {
-            Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
-            AutoSize = true,
-            BackColor = Color.FromArgb(42, 48, 57),
-            Checked = true,
-            ForeColor = Color.FromArgb(222, 226, 234),
-            TabIndex = 1,
-            Text = "Hide warnings",
-            UseVisualStyleBackColor = false
-        };
-
-        _parallelBuildCountLabel = new Label
-        {
-            Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
-            AutoSize = true,
-            BackColor = Color.FromArgb(42, 48, 57),
-            ForeColor = Color.FromArgb(222, 226, 234),
-            Text = "Max parallel"
-        };
-
-        _parallelBuildCountInput = new NumericUpDown
-        {
-            Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
-            BackColor = Color.FromArgb(14, 17, 22),
-            ForeColor = Color.FromArgb(222, 226, 234),
-            Minimum = 1,
-            Maximum = Math.Max(1, Environment.ProcessorCount),
-            Value = Math.Min(2, Math.Max(1, Environment.ProcessorCount)),
-            Width = 52
-        };
-
-        _logTabs = new TabControl
-        {
-            Dock = DockStyle.Fill,
-            DrawMode = TabDrawMode.OwnerDrawFixed,
-            HotTrack = true,
-            Multiline = false,
-            SizeMode = TabSizeMode.Fixed
-        };
-
-        _logBox = CreateLogBox();
-        _logTabs.TabPages.Add(CreateLogTabPage("All", _logBox));
+        InitializeComponent();
         UpdateLogTabHeaderSize();
-
-        _progressBar = new ProgressBar
-        {
-            Dock = DockStyle.Bottom,
-            Height = 18,
-            Style = ProgressBarStyle.Continuous
-        };
-
-        _statusLabel = new ToolStripStatusLabel("Ready")
-        {
-            Spring = true,
-            TextAlign = ContentAlignment.MiddleLeft
-        };
-
-        _statusStrip = new StatusStrip
-        {
-            Dock = DockStyle.Bottom,
-            BackColor = Color.FromArgb(42, 48, 57),
-            ForeColor = Color.White,
-            SizingGrip = false
-        };
-        _statusStrip.Items.Add(_statusLabel);
-
-        _dropPanel.Controls.Add(_rebuildButton);
-        _dropPanel.Controls.Add(_hideWarningsCheckBox);
-        _dropPanel.Controls.Add(_parallelBuildCountInput);
-        _dropPanel.Controls.Add(_parallelBuildCountLabel);
-        _dropPanel.Controls.Add(_dropPathLabel);
-        _dropPanel.Controls.Add(_dropTitleLabel);
-        _rebuildButton.BringToFront();
-        _hideWarningsCheckBox.BringToFront();
-        _parallelBuildCountInput.BringToFront();
-        _parallelBuildCountLabel.BringToFront();
-        Controls.Add(_logTabs);
-        Controls.Add(_progressBar);
-        Controls.Add(_statusStrip);
-        Controls.Add(_dropPanel);
-
-        DragEnter += HandleDragEnter;
-        DragDrop += HandleDragDrop;
-        _dropPanel.DragEnter += HandleDragEnter;
-        _dropPanel.DragDrop += HandleDragDrop;
-        _dropPanel.Resize += (_, _) => UpdateRebuildButtonLocation();
-        _logTabs.DrawItem += HandleLogTabDrawItem;
-        _rebuildButton.DragEnter += HandleDragEnter;
-        _rebuildButton.DragDrop += HandleDragDrop;
-        _rebuildButton.Click += HandleRebuildButtonClick;
-        _hideWarningsCheckBox.CheckedChanged += (_, _) => _hideWarnings = _hideWarningsCheckBox.Checked;
-
-        UpdateRebuildButtonLocation();
         AppendLog("Ready. Drop a root folder that contains C# projects or solutions.");
         AppendLog("If multiple executable projects are found, choose only the projects that are ready to build.");
     }
 
-    private void UpdateRebuildButtonLocation()
+    private void HandleHideWarningsCheckedChanged(object? sender, EventArgs e)
     {
-        _rebuildButton.Location = new Point(
-            Math.Max(24, _dropPanel.ClientSize.Width - _rebuildButton.Width - 24),
-            Math.Max(72, _dropPanel.ClientSize.Height - _rebuildButton.Height - 16));
+        _hideWarnings = _hideWarningsCheckBox.Checked;
+    }
 
-        _hideWarningsCheckBox.Location = new Point(
-            Math.Max(24, _rebuildButton.Left - _hideWarningsCheckBox.Width - 18),
-            _rebuildButton.Top + 6);
+    private void HandleUseDefaultOutputFolderButtonClick(object? sender, EventArgs e)
+    {
+        UseDefaultOutputFolder();
+    }
 
-        _parallelBuildCountInput.Location = new Point(
-            Math.Max(24, _hideWarningsCheckBox.Left - _parallelBuildCountInput.Width - 24),
-            _rebuildButton.Top + 3);
+    private void HandleStopBuildButtonClick(object? sender, EventArgs e)
+    {
+        if (!_isBuilding || _buildCancellationTokenSource is null)
+        {
+            return;
+        }
 
-        _parallelBuildCountLabel.Location = new Point(
-            Math.Max(24, _parallelBuildCountInput.Left - _parallelBuildCountLabel.Width - 8),
-            _rebuildButton.Top + 6);
+        _stopBuildButton.Enabled = false;
+        SetStatus("Stopping build...");
+        AppendLog("Build cancellation requested. Stopping active dotnet processes...");
+        _buildCancellationTokenSource.Cancel();
+    }
+
+    private void HandleBrowseOutputFolderButtonClick(object? sender, EventArgs e)
+    {
+        using FolderBrowserDialog dialog = new()
+        {
+            Description = "Select the folder where the build folder will be created.",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = true
+        };
+
+        string? currentBaseFolder = GetCurrentOutputBaseFolder();
+        if (currentBaseFolder is not null && Directory.Exists(currentBaseFolder))
+        {
+            dialog.InitialDirectory = currentBaseFolder;
+        }
+        else if (_lastRootPath is not null && Directory.Exists(_lastRootPath))
+        {
+            dialog.InitialDirectory = _lastRootPath;
+        }
+
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _useDefaultOutputFolder = false;
+            _outputFolderTextBox.Text = Path.Combine(dialog.SelectedPath, "build");
+        }
+    }
+
+    private string? GetCurrentOutputBaseFolder()
+    {
+        string outputPath = _outputFolderTextBox.Text.Trim();
+        return string.IsNullOrWhiteSpace(outputPath) ? null : Path.GetDirectoryName(outputPath);
+    }
+
+    private void UseDefaultOutputFolder()
+    {
+        _useDefaultOutputFolder = true;
+        _outputFolderTextBox.Text = _lastRootPath is null
+            ? string.Empty
+            : Path.Combine(_lastRootPath, "build");
     }
 
     private void HandleDragEnter(object? sender, DragEventArgs e)
@@ -263,8 +153,18 @@ public sealed class Form1 : Form
     private async Task BuildFromRootAsync(string rootPath, string[]? preferredTargetPaths = null)
     {
         _isBuilding = true;
+        _buildCancellationTokenSource?.Dispose();
+        _buildCancellationTokenSource = new CancellationTokenSource();
+        CancellationToken cancellationToken = _buildCancellationTokenSource.Token;
         _lastRootPath = rootPath;
+        if (_useDefaultOutputFolder)
+        {
+            _outputFolderTextBox.Text = Path.Combine(rootPath, "build");
+        }
+
         _rebuildButton.Enabled = false;
+        _stopBuildButton.Enabled = true;
+        SetBuildOptionsEnabled(false);
         _progressBar.Value = 0;
         SetStatus("Scanning solutions...");
         _dropPathLabel.Text = rootPath;
@@ -273,9 +173,10 @@ public sealed class Form1 : Form
 
         try
         {
-            string buildOutputPath = Path.Combine(rootPath, "build");
+            string buildOutputPath = GetBuildOutputPath(rootPath);
 
-            string[] targetPaths = await Task.Run(() => FindBuildTargets(rootPath));
+            string[] targetPaths = await Task.Run(() => FindBuildTargets(rootPath, buildOutputPath), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (targetPaths.Length == 0)
             {
@@ -298,14 +199,22 @@ public sealed class Form1 : Form
             int maxParallelBuilds = (int)_parallelBuildCountInput.Value;
             _progressBar.Maximum = targetPaths.Length * 4;
             AppendLog($"Building {targetPaths.Length} selected target(s). Max parallel: {maxParallelBuilds}.");
+            AppendLog($"Build output: {buildOutputPath}");
             SetStatus("Build is running in the background...");
 
-            int failures = await Task.Run(() => ExecuteBuildAsync(buildOutputPath, targetPaths, maxParallelBuilds));
+            int failures = await ExecuteBuildAsync(buildOutputPath, targetPaths, maxParallelBuilds, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             SetStatus(failures == 0
                 ? "Build completed successfully"
                 : $"Build completed with {failures} failed target(s)");
             AppendLog(failures == 0 ? "All builds completed successfully." : $"Finished with {failures} failed target(s).");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            MarkPendingTargetsCanceled();
+            SetStatus("Build canceled");
+            AppendLog("Build canceled by user. Partial output has been kept.");
         }
         catch (Exception ex)
         {
@@ -315,8 +224,31 @@ public sealed class Form1 : Form
         finally
         {
             _isBuilding = false;
+            _stopBuildButton.Enabled = false;
+            SetBuildOptionsEnabled(true);
             _rebuildButton.Enabled = _lastRootPath is not null && Directory.Exists(_lastRootPath);
+            _buildCancellationTokenSource.Dispose();
+            _buildCancellationTokenSource = null;
         }
+    }
+
+    private string GetBuildOutputPath(string rootPath)
+    {
+        string configuredPath = _outputFolderTextBox.Text.Trim();
+        if (_useDefaultOutputFolder || string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return Path.Combine(rootPath, "build");
+        }
+
+        return Path.GetFullPath(Environment.ExpandEnvironmentVariables(configuredPath));
+    }
+
+    private void SetBuildOptionsEnabled(bool enabled)
+    {
+        _parallelBuildCountInput.Enabled = enabled;
+        _outputFolderTextBox.Enabled = enabled;
+        _browseOutputFolderButton.Enabled = enabled;
+        _useDefaultOutputFolderButton.Enabled = enabled;
     }
 
     private void HandleLogTabDrawItem(object? sender, DrawItemEventArgs e)
@@ -340,6 +272,11 @@ public sealed class Form1 : Form
                 backColor = Color.Orange;
                 foreColor = Color.Black;
             }
+            else if (status.Equals("Canceled", StringComparison.OrdinalIgnoreCase))
+            {
+                backColor = Color.Khaki;
+                foreColor = Color.Black;
+            }
         }
 
         if (isSelected)
@@ -360,8 +297,14 @@ public sealed class Form1 : Form
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoClipping);
     }
 
-    private async Task<int> ExecuteBuildAsync(string buildOutputPath, string[] targetPaths, int maxParallelBuilds)
+    private async Task<int> ExecuteBuildAsync(
+        string buildOutputPath,
+        string[] targetPaths,
+        int maxParallelBuilds,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (Directory.Exists(buildOutputPath))
         {
             SetStatus("Deleting previous build folder...");
@@ -370,16 +313,18 @@ public sealed class Form1 : Form
         }
 
         Directory.CreateDirectory(buildOutputPath);
+        cancellationToken.ThrowIfCancellationRequested();
 
         int failures = 0;
         ParallelOptions parallelOptions = new()
         {
-            MaxDegreeOfParallelism = Math.Max(1, maxParallelBuilds)
+            MaxDegreeOfParallelism = Math.Max(1, maxParallelBuilds),
+            CancellationToken = cancellationToken
         };
 
-        await Parallel.ForEachAsync(targetPaths, parallelOptions, async (targetPath, _) =>
+        await Parallel.ForEachAsync(targetPaths, parallelOptions, async (targetPath, targetCancellationToken) =>
         {
-            bool succeeded = await BuildTargetAsync(targetPath, buildOutputPath);
+            bool succeeded = await BuildTargetAsync(targetPath, buildOutputPath, targetCancellationToken);
             if (!succeeded)
             {
                 Interlocked.Increment(ref failures);
@@ -389,10 +334,10 @@ public sealed class Form1 : Form
         return failures;
     }
 
-    private static string[] FindBuildTargets(string rootPath)
+    private static string[] FindBuildTargets(string rootPath, string buildOutputPath)
     {
         string[] projectPaths = Directory.EnumerateFiles(rootPath, "*.csproj", SearchOption.AllDirectories)
-            .Where(path => !IsUnderBuildOutput(rootPath, path))
+            .Where(path => !IsUnderBuildOutput(buildOutputPath, path))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -404,7 +349,7 @@ public sealed class Form1 : Form
         }
 
         return Directory.EnumerateFiles(rootPath, "*.*", SearchOption.AllDirectories)
-            .Where(path => !IsUnderBuildOutput(rootPath, path))
+            .Where(path => !IsUnderBuildOutput(buildOutputPath, path))
             .Where(IsSolutionFile)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -440,20 +385,25 @@ public sealed class Form1 : Form
             : Array.Empty<string>();
     }
 
-    private async Task<bool> BuildTargetAsync(string targetPath, string buildOutputPath)
+    private async Task<bool> BuildTargetAsync(
+        string targetPath,
+        string buildOutputPath,
+        CancellationToken cancellationToken)
     {
         string targetName = Path.GetFileNameWithoutExtension(targetPath);
         string outputFolderName = GetOutputFolderName(targetPath);
         bool targetSucceeded = false;
+        bool targetCanceled = false;
         AppendLog("");
         AppendLog($"Target: {targetPath}");
         AppendTargetLog(targetPath, $"Target: {targetPath}");
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             SetStatus($"Cleaning {targetName}...");
 
-            if (!await RunDotnetAsync(targetPath, "clean", targetPath, "--nologo", "-v", "q"))
+            if (!await RunDotnetAsync(targetPath, cancellationToken, "clean", targetPath, "--nologo", "-v", "q"))
             {
                 IncrementProgress();
                 return false;
@@ -461,7 +411,7 @@ public sealed class Form1 : Form
 
             IncrementProgress();
             SetStatus($"Restoring {targetName}...");
-            if (!await RunDotnetAsync(targetPath, "restore", targetPath, "--nologo"))
+            if (!await RunDotnetAsync(targetPath, cancellationToken, "restore", targetPath, "--nologo"))
             {
                 IncrementProgress();
                 return false;
@@ -476,6 +426,7 @@ public sealed class Form1 : Form
 
                 bool succeeded = await RunDotnetAsync(
                     targetPath,
+                    cancellationToken,
                     "build",
                     targetPath,
                     "-c",
@@ -496,9 +447,15 @@ public sealed class Form1 : Form
             targetSucceeded = true;
             return true;
         }
+        catch (OperationCanceledException)
+        {
+            targetCanceled = true;
+            AppendTargetLog(targetPath, "Build canceled.");
+            throw;
+        }
         finally
         {
-            MarkTargetTabCompleted(targetPath, targetSucceeded);
+            MarkTargetTabCompleted(targetPath, targetCanceled ? "Canceled" : targetSucceeded ? "Success" : "Failed");
         }
     }
 
@@ -549,15 +506,19 @@ public sealed class Form1 : Form
             || extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsUnderBuildOutput(string rootPath, string path)
+    private static bool IsUnderBuildOutput(string buildOutputPath, string path)
     {
-        string buildOutputPath = Path.GetFullPath(Path.Combine(rootPath, "build"));
+        buildOutputPath = Path.GetFullPath(buildOutputPath);
         string fullPath = Path.GetFullPath(path);
         return fullPath.StartsWith(buildOutputPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<bool> RunDotnetAsync(string targetPath, params string[] arguments)
+    private async Task<bool> RunDotnetAsync(
+        string targetPath,
+        CancellationToken cancellationToken,
+        params string[] arguments)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         string commandLine = $"> dotnet {string.Join(" ", arguments.Select(QuoteForLog))}";
         AppendLog(commandLine);
         AppendTargetLog(targetPath, commandLine);
@@ -583,7 +544,7 @@ public sealed class Form1 : Form
             process.StartInfo.ArgumentList.Add(argument);
         }
 
-        TaskCompletionSource<int> exitCodeSource = new();
+        TaskCompletionSource<int> exitCodeSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
         process.OutputDataReceived += (_, e) => AppendProcessLine(targetPath, e.Data);
         process.ErrorDataReceived += (_, e) => AppendProcessLine(targetPath, e.Data);
         process.Exited += (_, _) => exitCodeSource.TrySetResult(process.ExitCode);
@@ -600,11 +561,15 @@ public sealed class Form1 : Form
             return false;
         }
 
+        using CancellationTokenRegistration cancellationRegistration = cancellationToken.Register(
+            () => TryKillProcessTree(process));
+
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
         int exitCode = await exitCodeSource.Task;
         stopwatch.Stop();
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (exitCode != 0)
         {
@@ -618,6 +583,21 @@ public sealed class Form1 : Form
         AppendLog(completedMessage);
         AppendTargetLog(targetPath, completedMessage);
         return true;
+    }
+
+    private static void TryKillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // The process may have exited between the check and the kill request.
+        }
     }
 
     private static string FormatElapsed(TimeSpan elapsed)
@@ -757,11 +737,11 @@ public sealed class Form1 : Form
         targetLogBox.ScrollToCaret();
     }
 
-    private void MarkTargetTabCompleted(string targetPath, bool succeeded)
+    private void MarkTargetTabCompleted(string targetPath, string status)
     {
         if (InvokeRequired)
         {
-            BeginInvoke(() => MarkTargetTabCompleted(targetPath, succeeded));
+            BeginInvoke(() => MarkTargetTabCompleted(targetPath, status));
             return;
         }
 
@@ -770,7 +750,23 @@ public sealed class Form1 : Form
             return;
         }
 
-        tabPage.Tag = succeeded ? "Success" : "Failed";
+        tabPage.Tag = status;
+        _logTabs.Invalidate();
+    }
+
+    private void MarkPendingTargetsCanceled()
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(MarkPendingTargetsCanceled);
+            return;
+        }
+
+        foreach (TabPage tabPage in _targetLogPages.Values.Where(page => page.Tag is null))
+        {
+            tabPage.Tag = "Canceled";
+        }
+
         _logTabs.Invalidate();
     }
 
@@ -849,7 +845,7 @@ public sealed class BuildTargetSelectionDialog : Form
 
         foreach (string targetPath in targetPaths)
         {
-            _targetList.Items.Add(Path.GetRelativePath(rootPath, targetPath), true);
+            _targetList.Items.Add(Path.GetRelativePath(rootPath, targetPath), false);
         }
 
         Button selectAllButton = CreateSecondaryButton("Select All");
