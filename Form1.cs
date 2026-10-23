@@ -305,11 +305,24 @@ public sealed partial class Form1 : Form
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (Directory.Exists(buildOutputPath))
+        string[] targetOutputPaths = targetPaths
+            .Select(path => Path.GetFullPath(Path.Combine(buildOutputPath, GetOutputFolderName(path))))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        foreach (string targetOutputPath in targetOutputPaths)
         {
-            SetStatus("Deleting previous build folder...");
-            AppendLog($"Deleting: {buildOutputPath}");
-            Directory.Delete(buildOutputPath, true);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsUnderBuildOutput(buildOutputPath, targetOutputPath))
+            {
+                throw new InvalidOperationException($"Project output must be inside the build folder: {targetOutputPath}");
+            }
+
+            if (Directory.Exists(targetOutputPath))
+            {
+                SetStatus("Deleting previous project output...");
+                AppendLog($"Deleting: {targetOutputPath}");
+                Directory.Delete(targetOutputPath, true);
+            }
         }
 
         Directory.CreateDirectory(buildOutputPath);
@@ -508,9 +521,11 @@ public sealed partial class Form1 : Form
 
     private static bool IsUnderBuildOutput(string buildOutputPath, string path)
     {
-        buildOutputPath = Path.GetFullPath(buildOutputPath);
-        string fullPath = Path.GetFullPath(path);
-        return fullPath.StartsWith(buildOutputPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        string relativePath = Path.GetRelativePath(buildOutputPath, path);
+        return !Path.IsPathRooted(relativePath)
+            && relativePath != "."
+            && relativePath != ".."
+            && !relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     private Task<bool> RunMsBuildAsync(

@@ -12,6 +12,7 @@ SlnDropBuilder is a Windows desktop utility for building multiple .NET executabl
 - Builds project references automatically through MSBuild.
 - Automatically retries MSB4803 failures with Visual Studio MSBuild, including LC license compilation.
 - Outputs files to `build/{Project}/Debug` and `build/{Project}/Release`.
+- Cleans only the selected projects' output folders, preserving outputs for unselected projects.
 - Supports parallel project builds with a configurable maximum parallel count.
 - Shows a global log tab and separate per-project log tabs.
 - Marks completed project tabs with `LightBlue` for success and `Orange` for failure.
@@ -50,7 +51,9 @@ To choose another install folder or preview installation:
 .\install.ps1 -WhatIf
 ```
 
-Close SlnDropBuilder before updating it. Copy the entire `build/Release` folder when distributing the app. Building other projects still requires a suitable .NET SDK; the app also searches the SDK folder provisioned by the installer. Failures report the step and a retained log in `%TEMP%`.
+Close any SlnDropBuilder instance running from the destination folder before updating it. Instances running from other folders do not block building or installation. If a running instance's path cannot be determined, close it before retrying. Copy the entire `build/Release` folder when distributing the app. Building other projects still requires a suitable .NET SDK; the app also searches the SDK folder provisioned by the installer. Failures report the step and a retained log in `%TEMP%`.
+
+After building or updating, close the previous instance and launch the app from the output or installation folder. An already running instance continues to use the previous version.
 
 Run the script checks without downloading an SDK or changing the Start menu:
 
@@ -66,7 +69,7 @@ dotnet restore
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\BuildCommands.Tests.ps1
 ```
 
-These checks cover normal Debug/Release builds, MSB4803 retry success and failure, unrelated errors, and cancellation while a command is running. Verification files are retained under `.artifacts/test-check`.
+These checks cover project output cleanup, retrying only failed projects while preserving successful outputs, normal Debug/Release builds, MSB4803 retry success and failure, unrelated errors, and cancellation while a command is running. Verification files are retained under `.artifacts/test-check`.
 
 ## Run
 
@@ -91,6 +94,8 @@ For each selected executable project:
 
 `{Project}` is based on the final folder name that contains the selected `.csproj`.
 
+Before building, only the selected targets' `build/{Project}` folders are deleted and recreated. Other project folders and files in the build root are kept. To retry a failed project without clearing successful outputs, drop the folder again and select only the failed project. The Rebuild button repeats the previous selection.
+
 ## Notes
 
 SlnDropBuilder itself is a WinForms app, but it can build executable projects such as WinForms, WPF, console apps, and other .NET projects. Commands use `dotnet msbuild`; on MSB4803, the failed command is retried with Visual Studio MSBuild discovered through `vswhere`, including Build Tools installations. License compilation remains enabled.
@@ -113,6 +118,7 @@ SlnDropBuilder는 드래그 앤 드롭으로 선택한 폴더 안의 .NET 실행
 - 실행 프로젝트가 참조하는 라이브러리는 MSBuild가 자동으로 함께 빌드
 - LC 라이선스 컴파일 등에서 MSB4803 오류가 발생하면 Visual Studio MSBuild로 자동 재시도
 - 결과물을 `build/{Project}/Debug`, `build/{Project}/Release`에 생성
+- 선택한 프로젝트의 출력 폴더만 정리하고, 선택하지 않은 프로젝트의 결과물은 유지
 - 최대 병렬 빌드 개수 설정 가능
 - 전체 로그 탭과 프로젝트별 로그 탭 제공
 - 빌드 성공 탭은 `LightBlue`, 실패 탭은 `Orange`로 표시
@@ -154,7 +160,13 @@ bin/Debug/net8.0-windows/SlnDropBuilder.exe
 
 `{Project}`는 선택한 `.csproj`가 들어있는 마지막 폴더명을 기준으로 합니다.
 
+빌드 전에는 선택한 대상의 `build/{Project}` 폴더만 삭제하고 다시 생성합니다. 다른 프로젝트 폴더와 빌드 루트의 파일은 유지합니다. 실패한 프로젝트만 다시 빌드하려면 폴더를 다시 드롭하고 실패한 프로젝트만 선택하세요. Rebuild 버튼은 직전 선택 전체를 다시 빌드합니다.
+
 ## 참고
+
+`build.cmd`는 `build/Release`에 결과물을 생성합니다. 다른 폴더에서 실행 중인 SlnDropBuilder는 빌드나 설치를 막지 않습니다. 덮어쓸 대상 폴더에서 실행 중인 앱은 먼저 종료해야 하며, 실행 경로를 확인할 수 없는 경우에도 종료 후 다시 시도해야 합니다.
+
+빌드나 업데이트 후에는 기존 앱을 닫고 출력 또는 설치 폴더의 실행 파일로 다시 실행하세요. 이미 실행 중인 앱에는 수정된 내용이 반영되지 않습니다.
 
 SlnDropBuilder 자체는 WinForms 앱이지만, 빌드 대상은 WinForms에 한정되지 않습니다. WPF, 콘솔 앱, 기타 .NET 실행 프로젝트도 빌드할 수 있습니다. `dotnet msbuild`로 실행하며, MSB4803 오류가 발생하면 `vswhere`로 찾은 Visual Studio MSBuild로 재시도합니다. 이 경우 대상 프로젝트에 필요한 빌드 구성 요소가 포함된 Visual Studio 또는 Build Tools가 필요하며, 라이선스 컴파일은 유지됩니다.
 
@@ -169,4 +181,4 @@ dotnet restore
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\BuildCommands.Tests.ps1
 ```
 
-일반 Debug·Release 빌드, MSB4803 재시도 성공·실패, 다른 오류 처리, 명령 실행 중 취소를 검증합니다. 검증 파일은 `.artifacts/test-check`에 보관합니다.
+프로젝트별 출력 정리, 실패한 프로젝트만 재시도할 때 성공한 결과물 보존, 일반 Debug·Release 빌드, MSB4803 재시도 성공·실패, 다른 오류 처리, 명령 실행 중 취소를 검증합니다. 검증 파일은 `.artifacts/test-check`에 보관합니다.

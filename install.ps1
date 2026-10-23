@@ -34,13 +34,17 @@ try {
     if (-not (Test-Path -LiteralPath $project -PathType Leaf)) {
         throw 'Project source files are missing. Extract the entire repository; the PowerShell files alone cannot build SlnDropBuilder.'
     }
-    if (Get-Process -Name 'SlnDropBuilder' -ErrorAction SilentlyContinue) {
-        throw 'Close SlnDropBuilder before installing or updating it.'
-    }
     $InstallDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDirectory)
     $action = if ($BuildOnly) { 'Install missing .NET SDK and publish SlnDropBuilder build files' } else { 'Install missing .NET SDK, build and install SlnDropBuilder, and create a Start menu shortcut' }
     if (-not $PSCmdlet.ShouldProcess($InstallDirectory, $action)) {
         return
+    }
+    $destinationExecutable = Join-Path $InstallDirectory 'SlnDropBuilder.exe'
+    $runningDestination = Get-Process -Name 'SlnDropBuilder' -ErrorAction SilentlyContinue | Where-Object {
+        -not $_.Path -or [string]::Equals($_.Path, $destinationExecutable, [StringComparison]::OrdinalIgnoreCase)
+    }
+    if ($runningDestination) {
+        throw "Close SlnDropBuilder before updating '$InstallDirectory'."
     }
     # SDK selection and NuGet configuration must not depend on the caller's folder.
     Push-Location -LiteralPath $PSScriptRoot

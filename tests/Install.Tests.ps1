@@ -16,6 +16,7 @@ $global:SlnDropBuilderInstallerTest_downloadFailure = $false
 $global:SlnDropBuilderInstallerTest_primaryDownloadFailure = $false
 $global:SlnDropBuilderInstallerTest_brokenHost = $false
 $global:SlnDropBuilderInstallerTest_sourceDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$global:SlnDropBuilderInstallerTest_runningPaths = @((Join-Path $global:SlnDropBuilderInstallerTest_sourceDirectory 'bin\Debug\net8.0-windows\SlnDropBuilder.exe'))
 
 function Assert($Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }
@@ -43,7 +44,12 @@ function dotnet {
     $global:LASTEXITCODE = 0
 }
 
-function Get-Process { param($Name, $ErrorAction) }
+function Get-Process {
+    param($Name, $ErrorAction)
+    foreach ($path in $global:SlnDropBuilderInstallerTest_runningPaths) {
+        [pscustomobject]@{ Path = $path }
+    }
+}
 
 function Start-Transcript {
     param($Path, [switch] $Force)
@@ -122,6 +128,21 @@ else {
 Assert (-not (Test-Path -LiteralPath $global:SlnDropBuilderInstallerTest_lastPublishDirectory)) 'Temporary publish files were not cleaned up.'
 Assert ($global:SlnDropBuilderInstallerTest_downloads -eq 0) 'An installed SDK was not reused.'
 
+$calls = $global:SlnDropBuilderInstallerTest_publishCalls
+$shortcut = $global:SlnDropBuilderInstallerTest_savedShortcut
+foreach ($runningPath in @($executable.ToUpperInvariant(), $null)) {
+    $global:SlnDropBuilderInstallerTest_runningPaths = @($runningPath)
+    $failure = $null
+    try { & $installer -InstallDirectory $global:SlnDropBuilderInstallerTest_installDirectory -BuildOnly:$BuildOnly } catch { $failure = $_ }
+    Assert ($null -ne $failure -and $failure.ToString() -like '*Close*SlnDropBuilder*') 'A running destination or unknown process path was not blocked.'
+    Assert ($global:SlnDropBuilderInstallerTest_publishCalls -eq $calls) 'A running destination started a publish.'
+    Assert ((Get-Content -LiteralPath $executable) -eq 'new app') 'A running destination was changed.'
+    Assert ($global:SlnDropBuilderInstallerTest_savedShortcut -eq $shortcut) 'A blocked update changed the shortcut.'
+    & $installer -InstallDirectory $global:SlnDropBuilderInstallerTest_installDirectory -BuildOnly:$BuildOnly -WhatIf
+    Assert ($global:SlnDropBuilderInstallerTest_publishCalls -eq $calls) 'WhatIf started a publish with a running destination.'
+}
+$global:SlnDropBuilderInstallerTest_runningPaths = @()
+
 Set-Content -LiteralPath $executable -Value 'existing app'
 $global:SlnDropBuilderInstallerTest_savedShortcut = $null
 $global:SlnDropBuilderInstallerTest_publishFailure = $true
@@ -177,4 +198,4 @@ $failure = $null
 try { & (Join-Path $incompleteSource 'install.ps1') -BuildOnly } catch { $failure = $_ }
 Assert ($null -ne $failure -and $failure.ToString() -like '*source files are missing*') 'Missing source was not reported.'
 Assert ($global:SlnDropBuilderInstallerTest_downloads -eq $downloads) 'SDK was downloaded before checking the source.'
-Write-Host 'PASS: install/build, SDK detection/bootstrap/fallback/failure, source validation, caller folder, WhatIf, output preservation.'
+Write-Host 'PASS: install/build, destination process checks, SDK detection/bootstrap/fallback/failure, source validation, caller folder, WhatIf, output preservation.'

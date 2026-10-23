@@ -30,6 +30,7 @@ using SlnDropBuilder;
 internal static class Check
 {
     private static readonly MethodInfo Build = typeof(Form1).GetMethod("BuildTargetAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+    private static readonly MethodInfo Execute = typeof(Form1).GetMethod("ExecuteBuildAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
     private static readonly FieldInfo Log = typeof(Form1).GetField("_logBox", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
     [STAThread]
@@ -44,7 +45,7 @@ internal static class Check
             {
                 await RunChecks(form, args[0]);
                 result = 0;
-                Console.WriteLine("PASS: normal Debug/Release, MSB4803 fallback, fallback failure, unrelated error, active cancellation.");
+                Console.WriteLine("PASS: project output cleanup, failed project retry, normal Debug/Release, MSB4803 fallback, fallback failure, unrelated error, active cancellation.");
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
             finally { Application.ExitThread(); }
@@ -55,6 +56,7 @@ internal static class Check
 
     private static async Task RunChecks(Form1 form, string root)
     {
+        await CheckOutputCleanup(form, root);
         foreach (string mode in new[] { "Normal", "Framework", "FrameworkFails", "OtherError" })
         {
             string folder = Path.Combine(root, mode);
@@ -112,6 +114,73 @@ internal static class Check
         cancellation.Cancel();
         try { await task; throw new Exception("Cancellation was ignored."); }
         catch (OperationCanceledException) { }
+    }
+
+    private static async Task CheckOutputCleanup(Form1 form, string root)
+    {
+        string folder = Path.Combine(root, "project-cleanup");
+        string output = Path.Combine(folder, "build") + Path.DirectorySeparatorChar;
+        string runId = Guid.NewGuid().ToString("N");
+        string kept = Path.Combine(output, "Unselected", "Debug", "keep.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(kept)!);
+        File.WriteAllText(kept, runId);
+        string rootFile = Path.Combine(output, "keep-root.txt");
+        File.WriteAllText(rootFile, runId);
+        string[] targets = new string[2];
+        for (int i = 0; i < targets.Length; i++)
+        {
+            string name = i == 0 ? "Successful" : "Failed";
+            string projectFolder = Path.Combine(folder, runId, name);
+            Directory.CreateDirectory(projectFolder);
+            targets[i] = Path.Combine(projectFolder, "DifferentProjectName.csproj");
+            File.WriteAllText(targets[i], $$"""
+                <Project>
+                  <Target Name="Clean" />
+                  <Target Name="Restore" />
+                  <Target Name="Build">
+                    <Error Condition="'{{name}}' == 'Failed' and !Exists('$(MSBuildProjectDirectory)/allow-build')" Code="TEST003" Text="Expected failure" />
+                    <MakeDir Directories="$(OutputPath)" />
+                    <WriteLinesToFile File="$(OutputPath)result.txt" Lines="{{runId}}" Overwrite="true" />
+                  </Target>
+                </Project>
+                """);
+            foreach (string configuration in new[] { "Debug", "Release" })
+            {
+                string stale = Path.Combine(output, name, configuration, "stale.txt");
+                Directory.CreateDirectory(Path.GetDirectoryName(stale)!);
+                File.WriteAllText(stale, "obsolete");
+            }
+        }
+
+        int failures = await (Task<int>)Execute.Invoke(form, [output, targets, 2, CancellationToken.None])!;
+        Assert(failures == 1, "Mixed build did not report one failure.");
+        Assert(File.Exists(kept) && File.ReadAllText(kept) == runId, "An unselected project's output was deleted.");
+        Assert(File.Exists(rootFile) && File.ReadAllText(rootFile) == runId, "An unrelated file in the build root was deleted.");
+        foreach (string name in new[] { "Successful", "Failed" })
+        {
+            foreach (string configuration in new[] { "Debug", "Release" })
+                Assert(!File.Exists(Path.Combine(output, name, configuration, "stale.txt")), "Selected project retained stale output.");
+        }
+
+        string completed = Path.Combine(output, "Successful", "keep-completed.txt");
+        File.WriteAllText(completed, runId);
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(targets[1])!, "allow-build"), "retry");
+        failures = await (Task<int>)Execute.Invoke(form, [output, new[] { targets[1] }, 2, CancellationToken.None])!;
+        Assert(failures == 0, "Retry did not succeed.");
+        Assert(File.Exists(completed) && File.ReadAllText(completed) == runId, "Retry deleted a successful project's output.");
+        foreach (string name in new[] { "Successful", "Failed" })
+        {
+            foreach (string configuration in new[] { "Debug", "Release" })
+                Assert(File.ReadAllText(Path.Combine(output, name, configuration, "result.txt")).Trim() == runId, "Project output was not rebuilt or preserved.");
+        }
+
+        try
+        {
+            await (Task<int>)Execute.Invoke(form, [output, new[] { Path.Combine(folder, "..sln") }, 1, CancellationToken.None])!;
+            throw new Exception("A target resolving to the build root was accepted.");
+        }
+        catch (InvalidOperationException) { }
+        Assert(File.Exists(rootFile), "The build root was deleted.");
     }
 
     private static void Assert(bool condition, string message)
