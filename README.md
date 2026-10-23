@@ -28,6 +28,35 @@ SlnDropBuilder is a Windows desktop utility for building multiple .NET executabl
 dotnet build
 ```
 
+## Build and install scripts
+
+Double-click `build.cmd` to publish the app and its runtime to `build/Release`, or `install.cmd` to install it in `%LOCALAPPDATA%\Programs\SlnDropBuilder` and create a Start menu shortcut. Both batch files keep the console open so you can read the result.
+
+Equivalent PowerShell commands:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+The scripts require 64-bit Windows and the entire repository. They reuse an installed .NET 8 or later SDK, or download .NET 8 from Microsoft into `%LOCALAPPDATA%\Microsoft\dotnet` if needed. SDK download and package restore require Internet access. No administrator rights are needed.
+
+To choose another install folder or preview installation:
+
+```powershell
+.\install.ps1 -InstallDirectory 'D:\Apps\SlnDropBuilder'
+.\install.ps1 -WhatIf
+```
+
+Close SlnDropBuilder before updating it. Copy the entire `build/Release` folder when distributing the app. Building other projects still requires a suitable .NET SDK; the app also searches the SDK folder provisioned by the installer. Failures report the step and a retained log in `%TEMP%`.
+
+Run the script checks without downloading an SDK or changing the Start menu:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Install.Tests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Install.Tests.ps1 -BuildOnly
+```
+
 ## Run
 
 ```powershell
