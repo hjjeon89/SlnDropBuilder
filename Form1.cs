@@ -42,7 +42,7 @@ public sealed partial class Form1 : Form
 
         _stopBuildButton.Enabled = false;
         SetStatus("Stopping build...");
-        AppendLog("Build cancellation requested. Stopping active dotnet processes...");
+        AppendLog("Build cancellation requested. Stopping active build processes...");
         _buildCancellationTokenSource.Cancel();
     }
 
@@ -403,7 +403,7 @@ public sealed partial class Form1 : Form
             cancellationToken.ThrowIfCancellationRequested();
             SetStatus($"Cleaning {targetName}...");
 
-            if (!await RunDotnetAsync(targetPath, cancellationToken, "clean", targetPath, "--nologo", "-v", "q"))
+            if (!await RunMsBuildAsync(targetPath, cancellationToken, targetPath, "-t:Clean", "-nologo", "-v:q"))
             {
                 IncrementProgress();
                 return false;
@@ -411,7 +411,7 @@ public sealed partial class Form1 : Form
 
             IncrementProgress();
             SetStatus($"Restoring {targetName}...");
-            if (!await RunDotnetAsync(targetPath, cancellationToken, "restore", targetPath, "--nologo"))
+            if (!await RunMsBuildAsync(targetPath, cancellationToken, targetPath, "-t:Restore", "-nologo"))
             {
                 IncrementProgress();
                 return false;
@@ -424,14 +424,14 @@ public sealed partial class Form1 : Form
                 string outputPath = Path.Combine(buildOutputPath, outputFolderName, configuration)
                     + Path.DirectorySeparatorChar;
 
-                bool succeeded = await RunDotnetAsync(
+                bool succeeded = await RunMsBuildAsync(
                     targetPath,
                     cancellationToken,
-                    "build",
                     targetPath,
-                    "-c",
-                    configuration,
-                    "--nologo",
+                    "-restore",
+                    "-t:Build",
+                    $"-p:Configuration={configuration}",
+                    "-nologo",
                     "-p:Platform=Any CPU",
                     $"-p:OutputPath={outputPath}");
 
@@ -513,13 +513,22 @@ public sealed partial class Form1 : Form
         return fullPath.StartsWith(buildOutputPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<bool> RunDotnetAsync(
+    private Task<bool> RunMsBuildAsync(
+        string targetPath,
+        CancellationToken cancellationToken,
+        params string[] arguments)
+    {
+        return RunBuildProcessAsync("dotnet", targetPath, cancellationToken, ["msbuild", .. arguments]);
+    }
+
+    private async Task<bool> RunBuildProcessAsync(
+        string executable,
         string targetPath,
         CancellationToken cancellationToken,
         params string[] arguments)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        string commandLine = $"> dotnet {string.Join(" ", arguments.Select(QuoteForLog))}";
+        string commandLine = $"> {QuoteForLog(executable)} {string.Join(" ", arguments.Select(QuoteForLog))}";
         AppendLog(commandLine);
         AppendTargetLog(targetPath, commandLine);
         Stopwatch stopwatch = Stopwatch.StartNew();
@@ -528,15 +537,14 @@ public sealed partial class Form1 : Form
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = "dotnet",
+                FileName = executable,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8,
                 CreateNoWindow = true
-            },
-            EnableRaisingEvents = true
+            }
         };
 
         foreach (string argument in arguments)
@@ -544,10 +552,19 @@ public sealed partial class Form1 : Form
             process.StartInfo.ArgumentList.Add(argument);
         }
 
-        TaskCompletionSource<int> exitCodeSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        process.OutputDataReceived += (_, e) => AppendProcessLine(targetPath, e.Data);
-        process.ErrorDataReceived += (_, e) => AppendProcessLine(targetPath, e.Data);
-        process.Exited += (_, _) => exitCodeSource.TrySetResult(process.ExitCode);
+        int requiresFrameworkMsBuild = 0;
+        void HandleOutput(object sender, DataReceivedEventArgs e)
+        {
+            if (e.Data?.Contains("error MSB4803:", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                Interlocked.Exchange(ref requiresFrameworkMsBuild, 1);
+            }
+
+            AppendProcessLine(targetPath, e.Data);
+        }
+
+        process.OutputDataReceived += HandleOutput;
+        process.ErrorDataReceived += HandleOutput;
 
         try
         {
@@ -555,7 +572,7 @@ public sealed partial class Form1 : Form
         }
         catch (Exception ex)
         {
-            string message = $"Failed to start dotnet: {ex.Message}";
+            string message = $"Failed to start {executable}: {ex.Message}";
             AppendLog(message);
             AppendTargetLog(targetPath, message);
             return false;
@@ -567,12 +584,29 @@ public sealed partial class Form1 : Form
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        int exitCode = await exitCodeSource.Task;
+        await process.WaitForExitAsync();
+        int exitCode = process.ExitCode;
         stopwatch.Stop();
         cancellationToken.ThrowIfCancellationRequested();
 
         if (exitCode != 0)
         {
+            if (requiresFrameworkMsBuild != 0 && executable == "dotnet")
+            {
+                string? msBuildPath = await FindFrameworkMsBuildAsync(cancellationToken);
+                if (msBuildPath is not null)
+                {
+                    string retryMessage = "MSB4803: retrying with Visual Studio MSBuild (.NET Framework).";
+                    AppendLog(retryMessage);
+                    AppendTargetLog(targetPath, retryMessage);
+                    return await RunBuildProcessAsync(msBuildPath, targetPath, cancellationToken, arguments[1..]);
+                }
+
+                string missingMessage = "MSB4803 requires Visual Studio or Build Tools with MSBuild and the target project's build components. Install them and retry.";
+                AppendLog(missingMessage);
+                AppendTargetLog(targetPath, missingMessage);
+            }
+
             string message = $"Command failed with exit code {exitCode}. Elapsed: {FormatElapsed(stopwatch.Elapsed)}";
             AppendLog(message);
             AppendTargetLog(targetPath, message);
@@ -583,6 +617,50 @@ public sealed partial class Form1 : Form
         AppendLog(completedMessage);
         AppendTargetLog(targetPath, completedMessage);
         return true;
+    }
+
+    private static async Task<string?> FindFrameworkMsBuildAsync(CancellationToken cancellationToken)
+    {
+        string vsWherePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            "Microsoft Visual Studio", "Installer", "vswhere.exe");
+        if (!File.Exists(vsWherePath))
+        {
+            return null;
+        }
+
+        using Process process = new()
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = vsWherePath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                CreateNoWindow = true,
+                ArgumentList = { "-latest", "-products", "*", "-requires", "Microsoft.Component.MSBuild",
+                    "-find", @"MSBuild\**\Bin\MSBuild.exe", "-utf8" }
+            }
+        };
+
+        try
+        {
+            process.Start();
+            using CancellationTokenRegistration registration = cancellationToken.Register(() => TryKillProcessTree(process));
+            Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+            string output = await outputTask;
+            await errorTask;
+            return process.ExitCode == 0
+                ? output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(File.Exists)
+                : null;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
     }
 
     private static void TryKillProcessTree(Process process)
