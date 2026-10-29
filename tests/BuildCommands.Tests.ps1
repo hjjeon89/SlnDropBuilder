@@ -16,8 +16,10 @@ $project = @'
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Program.cs" />
     <Reference Include="SlnDropBuilder"><HintPath>../SlnDropBuilder.dll</HintPath></Reference>
   </ItemGroup>
 </Project>
@@ -44,8 +46,12 @@ internal static class Check
             try
             {
                 await RunChecks(form, args[0]);
+                if (args.Length > 1)
+                    await CheckNet10(form, args[0], args[1]);
+                else
+                    Console.WriteLine("SKIP: .NET 10 project/solution checks require an installed .NET 10 SDK.");
                 result = 0;
-                Console.WriteLine("PASS: project output cleanup, failed project retry, normal Debug/Release, MSB4803 fallback, fallback failure, unrelated error, active cancellation.");
+                Console.WriteLine("PASS: project output cleanup, failed project retry, normal Debug/Release, target working directory, MSB4803 fallback, fallback failure, unrelated error, active cancellation.");
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
             finally { Application.ExitThread(); }
@@ -64,6 +70,9 @@ internal static class Check
             string project = Path.Combine(folder, "Fixture.proj");
             File.WriteAllText(project, $$"""
                 <Project>
+                  <Target Name="CheckWorkingDirectory" BeforeTargets="Clean;Restore;Build">
+                    <Error Condition="'$(MSBuildStartupDirectory)' != '$(MSBuildProjectDirectory)'" Text="Build did not start in the target directory." />
+                  </Target>
                   <Target Name="Clean" />
                   <Target Name="Restore" />
                   <Target Name="Build">
@@ -183,6 +192,58 @@ internal static class Check
         Assert(File.Exists(rootFile), "The build root was deleted.");
     }
 
+    private static async Task CheckNet10(Form1 form, string root, string sdkVersion)
+    {
+        string folder = Path.Combine(root, "net10");
+        string targetFolder = Path.Combine(folder, "target");
+        string appFolder = Path.Combine(targetFolder, "App");
+        string callerFolder = Path.Combine(folder, "caller");
+        Directory.CreateDirectory(appFolder);
+        Directory.CreateDirectory(callerFolder);
+        File.WriteAllText(Path.Combine(callerFolder, "global.json"), """{"sdk":{"version":"99.0.100","rollForward":"disable"}}""");
+        File.WriteAllText(Path.Combine(targetFolder, "global.json"), $$"""
+            {
+              "sdk": { "version": "{{sdkVersion}}", "rollForward": "disable" }
+            }
+            """);
+        string project = Path.Combine(appFolder, "App.csproj");
+        File.WriteAllText(project, """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>Exe</OutputType>
+                <TargetFramework>net10.0</TargetFramework>
+                <NuGetAudit>false</NuGetAudit>
+              </PropertyGroup>
+              <Target Name="RecordSdk" AfterTargets="Build">
+                <WriteLinesToFile File="$(OutputPath)sdk.txt" Lines="$(NETCoreSdkVersion)|$(TargetFramework)" Overwrite="true" />
+              </Target>
+            </Project>
+            """);
+        File.WriteAllText(Path.Combine(appFolder, "Program.cs"), "System.Console.WriteLine(\".NET 10\");");
+        string solution = Path.Combine(targetFolder, "Fixture.slnx");
+        File.WriteAllText(solution, """<Solution><Project Path="App/App.csproj" /></Solution>""");
+        string originalDirectory = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = callerFolder;
+            foreach (string target in new[] { project, solution })
+            {
+                string output = Path.Combine(folder, "output with spaces");
+                bool success = await (Task<bool>)Build.Invoke(form, [target, output, CancellationToken.None])!;
+                Assert(success, $".NET 10 target failed: {target}\n{((RichTextBox)Log.GetValue(form)!).Text}");
+                Assert(Environment.CurrentDirectory == callerFolder, "Build changed the application's working directory.");
+                foreach (string configuration in new[] { "Debug", "Release" })
+                {
+                    string result = Path.Combine(output, Path.GetFileNameWithoutExtension(target), configuration);
+                    Assert(File.Exists(Path.Combine(result, "App.dll")), ".NET 10 assembly was not built.");
+                    Assert(File.ReadAllText(Path.Combine(result, "sdk.txt")).Trim() == $"{sdkVersion}|net10.0", "Target global.json did not select the expected SDK.");
+                }
+            }
+        }
+        finally { Environment.CurrentDirectory = originalDirectory; }
+        Console.WriteLine("PASS: .NET 10 project/SLNX Debug/Release builds use the target global.json despite an incompatible caller global.json.");
+    }
+
     private static void Assert(bool condition, string message)
     {
         if (!condition) throw new Exception(message);
@@ -190,5 +251,10 @@ internal static class Check
 }
 '@
 [IO.File]::WriteAllText((Join-Path $check 'Program.cs'), $source, $utf8)
-& dotnet run --project (Join-Path $check 'Check.csproj') -p:NuGetAudit=false -- $check
+$sdks = @(& dotnet --list-sdks)
+if ($LASTEXITCODE -ne 0) { throw 'Could not list installed SDKs.' }
+$net10Sdk = $sdks | Where-Object { $_ -match '^10\.0\.\d+ ' } | ForEach-Object { ($_ -split ' ')[0] } | Select-Object -Last 1
+$checkArguments = @($check)
+if ($net10Sdk) { $checkArguments += $net10Sdk }
+& dotnet run --project (Join-Path $check 'Check.csproj') -p:NuGetAudit=false -- @checkArguments
 if ($LASTEXITCODE -ne 0) { throw 'Build command checks failed.' }

@@ -553,6 +553,7 @@ public sealed partial class Form1 : Form
             StartInfo = new ProcessStartInfo
             {
                 FileName = executable,
+                WorkingDirectory = Path.GetDirectoryName(targetPath),
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
